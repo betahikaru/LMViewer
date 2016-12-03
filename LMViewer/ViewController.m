@@ -140,7 +140,7 @@
         NSString *key = [peripheral.identifier UUIDString];
         NSNumber *switchValue = [self.switchValues valueForKey:key];
         NSDate *lastUpdatedTime = [self.lastUpdatedTimes valueForKey:key];
-        NSLog(@"XXX Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime);
+        NSLog(@"MSG-0021-I Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime);
     }
 }
 
