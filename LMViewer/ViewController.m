@@ -136,12 +136,23 @@
 }
 
 - (void)dumpCurrentStatus {
+    NSString *statusText = @"";
     for (CBPeripheral *peripheral in self.peripherals) {
         NSString *key = [peripheral.identifier UUIDString];
         NSNumber *switchValue = [self.switchValues valueForKey:key];
         NSDate *lastUpdatedTime = [self.lastUpdatedTimes valueForKey:key];
-        NSLog(@"MSG-0021-I Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime);
+
+        NSString *logText = [NSString stringWithFormat:@"MSG-0021-I Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime];
+        NSLog(@"%@", logText);
+
+        NSString *switchValueString = @"Locked";
+        if ([switchValue isEqual:[NSNumber numberWithInt:0]]) {
+            switchValueString = @"Unlocked";
+        }
+        NSString *viewText = [NSString stringWithFormat:@"id: %@\n  Status: %@\n  lastUpdate: %@\n", key, switchValueString, lastUpdatedTime];
+        statusText = [NSString stringWithFormat:@"%@%@\n", statusText, viewText];
     }
+    _statusTextView.text = statusText;
 }
 
 
