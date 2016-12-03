@@ -15,6 +15,7 @@
 
 @interface ViewController () <CBCentralManagerDelegate, CBPeripheralDelegate> {
     BOOL isScanning;
+    BOOL isRefreshTapped;
 }
 @property (nonatomic, strong) CBCentralManager *centralManager; // BLE Central Manager
 @property (nonatomic, strong) NSMutableArray *peripherals;      // Connected BLE Pripheral(s)
@@ -35,6 +36,9 @@
     // Key/Value Storeを初期化
     self.switchValues = [[NSMutableDictionary alloc] init];
     self.lastUpdatedTimes = [[NSMutableDictionary alloc] init];
+
+    // 状態を初期化
+    isRefreshTapped = NO;
 }
 
 - (void)didReceiveMemoryWarning {
@@ -62,12 +66,23 @@
     if (isScanning) {
         [self.centralManager stopScan];
         isScanning = NO;
+        BOOL isAllDisconnected = YES;
         for (CBPeripheral *peripheral in self.peripherals) {
-            [self.centralManager cancelPeripheralConnection:peripheral];
-            NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
+            if ((peripheral.state == CBPeripheralStateConnected)
+                || (peripheral.state == CBPeripheralStateConnecting)) {
+                [self.centralManager cancelPeripheralConnection:peripheral];
+                isAllDisconnected = NO;
+                NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
+            }
         }
-//        self.peripherals = nil;
         NSLog(@"MSG-0002-I Stopped Scan.");
+        if (isAllDisconnected && isRefreshTapped) {
+            isRefreshTapped = NO;
+            [self startPeripheralScan];
+        }
+    } else {
+        isRefreshTapped = NO;
+        [self startPeripheralScan];
     }
     return YES;
 }
@@ -159,10 +174,13 @@
 // =============================================================================
 #pragma mark - IBOutlet
 
-- (IBAction)tapStopBtn:(UIButton *)sender {
+- (IBAction)tapRefreshBtn:(UIButton *)sender {
+    if (isRefreshTapped) {
+        return;
+    }
+    isRefreshTapped = YES;
     [self stopPeripheralScan];
 }
-
 
 // =============================================================================
 #pragma mark - CBCentralManagerDelegate
@@ -213,6 +231,28 @@
                          error:(NSError *)error
 {
     NSLog(@"MSG-0008-E Failed to connect to peripheral:%@, error:%@", peripheral, error);
+}
+
+// ペリフェラルと接続解除するとよばれる
+- (void)     centralManager:(CBCentralManager *)central
+    didDisconnectPeripheral:(CBPeripheral *)peripheral
+                      error:(NSError *)error
+{
+    if (error) {
+        NSLog(@"MSG-0022-E Failed to disconnect peripheral. peripheral:%@, error:%@", peripheral, error);
+        return;
+    }
+    BOOL isAllDisconnected = YES;
+    for (CBPeripheral *aPeripheral in self.peripherals) {
+        if (aPeripheral.state != CBPeripheralStateDisconnected) {
+            isAllDisconnected = NO;
+        }
+    }
+    if (isAllDisconnected && isRefreshTapped) {
+        self.peripherals = nil;
+        isRefreshTapped = NO;
+        [self startPeripheralScan];
+    }
 }
 
 // =============================================================================
