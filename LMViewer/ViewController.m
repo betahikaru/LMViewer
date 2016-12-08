@@ -13,13 +13,15 @@
 #define SERVICE_UUID_LEAFEE_MAG           @"3C111002-C75C-50C4-1F1A-6789E2AFDE4E"
 #define CHARACTERISTICS_UUID_LEAFEE_MAG   @"3C113000-C75C-50C4-1F1A-6789E2AFDE4E"
 
-@interface ViewController () <CBCentralManagerDelegate, CBPeripheralDelegate> {
+@interface ViewController () <CBCentralManagerDelegate, CBPeripheralDelegate, UITableViewDelegate, UITableViewDataSource> {
     BOOL isScanning;
+    BOOL isRefreshTapped;
 }
 @property (nonatomic, strong) CBCentralManager *centralManager; // BLE Central Manager
 @property (nonatomic, strong) NSMutableArray *peripherals;      // Connected BLE Pripheral(s)
 @property (nonatomic, strong) NSMutableDictionary<NSString*, NSNumber*> *switchValues;  // Switch value for Peripheral(s)
 @property (nonatomic, strong) NSMutableDictionary<NSString*, NSDate*> *lastUpdatedTimes;     // Last time to updated switch value for Peripheral(s)
+@property (nonatomic, strong) NSMutableDictionary<NSString*, NSString*> *peripheralsDescriptions;  // Description for Peripheral(s)
 
 @end
 
@@ -35,6 +37,14 @@
     // Key/Value Storeを初期化
     self.switchValues = [[NSMutableDictionary alloc] init];
     self.lastUpdatedTimes = [[NSMutableDictionary alloc] init];
+    self.peripheralsDescriptions = [[NSMutableDictionary alloc] init];
+
+    // 状態を初期化
+    isRefreshTapped = NO;
+
+    // tableを初期化
+    self.peripheralsTable.delegate = self;
+    self.peripheralsTable.dataSource = self;
 }
 
 - (void)didReceiveMemoryWarning {
@@ -48,6 +58,7 @@
 - (BOOL)startPeripheralScan {
     if (!isScanning) {
         isScanning = YES;
+//        NSArray *serviceUUIDs = @[[CBUUID UUIDWithString:SERVICE_UUID_LEAFEE_MAG]];
         NSDictionary *option = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:NO]
                                                            forKey:CBCentralManagerScanOptionAllowDuplicatesKey];
         [self.centralManager scanForPeripheralsWithServices:nil
@@ -62,12 +73,23 @@
     if (isScanning) {
         [self.centralManager stopScan];
         isScanning = NO;
+        BOOL isAllDisconnected = YES;
         for (CBPeripheral *peripheral in self.peripherals) {
-            [self.centralManager cancelPeripheralConnection:peripheral];
-            NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
+            if ((peripheral.state == CBPeripheralStateConnected)
+                || (peripheral.state == CBPeripheralStateConnecting)) {
+                [self.centralManager cancelPeripheralConnection:peripheral];
+                isAllDisconnected = NO;
+                NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
+            }
         }
-//        self.peripherals = nil;
         NSLog(@"MSG-0002-I Stopped Scan.");
+        if (isAllDisconnected && isRefreshTapped) {
+            isRefreshTapped = NO;
+            [self startPeripheralScan];
+        }
+    } else {
+        isRefreshTapped = NO;
+        [self startPeripheralScan];
     }
     return YES;
 }
@@ -125,6 +147,8 @@
                 NSLog(@"MSG-0014-I Read value for charasteristic. uuid:%@", CHARACTERISTICS_UUID_LEAFEE_MAG);
                 [peripheral readValueForCharacteristic:characteristic];
                 foundTargetCharasteristics = YES;
+                // Notifyを受け取る設定
+                [peripheral setNotifyValue:YES forCharacteristic:characteristic];
             } else {
                 NSLog(@"MSG-0015-W Read value for charasteristic. Properties(Read:ON, Notify:ON, Write:OFF). characteristic:%@", characteristic);
             }
@@ -136,22 +160,50 @@
 }
 
 - (void)dumpCurrentStatus {
+    NSString *statusText = @"";
     for (CBPeripheral *peripheral in self.peripherals) {
         NSString *key = [peripheral.identifier UUIDString];
         NSNumber *switchValue = [self.switchValues valueForKey:key];
         NSDate *lastUpdatedTime = [self.lastUpdatedTimes valueForKey:key];
-        NSLog(@"XXX Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime);
+
+        NSString *logText = [NSString stringWithFormat:@"MSG-0021-I Dump Value. peripheral:%@, switchValue:%@, lastUpdatedTime:%@", key, switchValue, lastUpdatedTime];
+        NSLog(@"%@", logText);
+
+        NSString *switchValueString = @"Locked";
+        if ([switchValue isEqual:[NSNumber numberWithInt:0]]) {
+            switchValueString = @"Unlocked";
+        }
+        NSString *viewText = [NSString stringWithFormat:@"id: %@\n  Status: %@\n  lastUpdate: %@\n", key, switchValueString, lastUpdatedTime];
+        statusText = [NSString stringWithFormat:@"%@%@\n", statusText, viewText];
     }
+    _statusTextView.text = statusText;
+
+    // テーブル更新
+    for (CBPeripheral *peripheral in self.peripherals) {
+        NSString *uuid = peripheral.identifier.UUIDString;
+        NSNumber *swValue = [self.switchValues objectForKey:uuid];
+        NSString *lastUpdateTime = [[self.lastUpdatedTimes objectForKey:uuid] description];
+        NSString *swStr = @"Unlocked";
+        if ([swValue intValue] != 0) {
+            swStr = @"Locked";
+        }
+        [self.peripheralsDescriptions setValue:[NSString stringWithFormat:@"%@:\n %@ (%@)", swStr, lastUpdateTime, uuid]
+                                        forKey:uuid];
+    }
+    [self.peripheralsTable reloadData];
 }
 
 
 // =============================================================================
 #pragma mark - IBOutlet
 
-- (IBAction)tapStopBtn:(UIButton *)sender {
+- (IBAction)tapRefreshBtn:(UIButton *)sender {
+    if (isRefreshTapped) {
+        return;
+    }
+    isRefreshTapped = YES;
     [self stopPeripheralScan];
 }
-
 
 // =============================================================================
 #pragma mark - CBCentralManagerDelegate
@@ -202,6 +254,28 @@
                          error:(NSError *)error
 {
     NSLog(@"MSG-0008-E Failed to connect to peripheral:%@, error:%@", peripheral, error);
+}
+
+// ペリフェラルと接続解除するとよばれる
+- (void)     centralManager:(CBCentralManager *)central
+    didDisconnectPeripheral:(CBPeripheral *)peripheral
+                      error:(NSError *)error
+{
+    if (error) {
+        NSLog(@"MSG-0022-E Failed to disconnect peripheral. peripheral:%@, error:%@", peripheral, error);
+        return;
+    }
+    BOOL isAllDisconnected = YES;
+    for (CBPeripheral *aPeripheral in self.peripherals) {
+        if (aPeripheral.state != CBPeripheralStateDisconnected) {
+            isAllDisconnected = NO;
+        }
+    }
+    if (isAllDisconnected && isRefreshTapped) {
+        self.peripherals = nil;
+        isRefreshTapped = NO;
+        [self startPeripheralScan];
+    }
 }
 
 // =============================================================================
@@ -268,7 +342,76 @@
     }
 }
 
+// 通知を受け取ると呼ばれる
+- (void)                             peripheral:(CBPeripheral *)peripheral
+    didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic
+                                          error:(NSError *)error {
+    if (error) {
+        NSLog(@"MSG-0023-E Faild to recive notify from charasteristic. peripheral:%@, characteristic:%@, error:%@", peripheral.identifier, characteristic.UUID, error);
+        return;
+    }
+    NSLog(@"MSG-0024-I Recive notify from Leafee Mag. peripheral:%@, characteristic:%@", peripheral.identifier, characteristic.UUID);
+    NSLog(@"MSG-0025-I Read value for charasteristic. uuid:%@", CHARACTERISTICS_UUID_LEAFEE_MAG);
+    [peripheral readValueForCharacteristic:characteristic];
+}
+
 // =============================================================================
-#pragma end
+#pragma mark - UITableViewDelegate
+
+- (void)          tableView:(UITableView *)tableView
+    didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+
+// =============================================================================
+#pragma mark - UITableViewDataSource
+
+- (NSInteger) numberOfSectionsInTableView:(UITableView *)tableView {
+    return 1;
+}
+
+- (NSString*)     tableView:(UITableView *)tableView
+    titleForHeaderInSection:(NSInteger)section {
+    return PERIPHERAL_PREFIX_MAG;
+}
+
+
+- (CGFloat)       tableView:(UITableView *)tableView
+    heightForRowAtIndexPath:(NSIndexPath *)indexPath {
+    return 80;
+}
+
+- (NSInteger)   tableView:(UITableView *)tableView
+    numberOfRowsInSection:(NSInteger)section {
+    if (!self.peripherals) {
+        return 1;
+    } else {
+        return self.peripherals.count;
+    }
+}
+
+- (UITableViewCell*) tableView:(UITableView *)tableView
+         cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (!self.peripherals) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"none"];
+        cell =[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"none"];;
+        cell.textLabel.text = @"None MAG";
+        return cell;
+    } else {
+        CBPeripheral *peripheral = [self.peripherals objectAtIndex:indexPath.row];
+        NSString *peripheralUUID = peripheral.identifier.UUIDString;
+        // 指定したkeyでcellデータを取得。データが無い場合，UITableViewCellを生成し，指定したkeyでキャッシュする。
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:peripheralUUID];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:peripheralUUID];
+            cell.textLabel.numberOfLines = 3;
+        }
+        cell.textLabel.text = [self.peripheralsDescriptions valueForKey:peripheralUUID];
+        return cell;
+    }
+}
+
+// =============================================================================
+#pragma mark - end
 
 @end

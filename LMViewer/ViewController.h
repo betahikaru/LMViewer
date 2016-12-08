@@ -10,6 +10,8 @@
 
 @interface ViewController : UIViewController
 
+@property (weak, nonatomic) IBOutlet UITextView *statusTextView;
 
+@property (weak, nonatomic) IBOutlet UITableView *peripheralsTable;
 @end
 
