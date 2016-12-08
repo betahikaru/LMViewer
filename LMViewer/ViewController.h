@@ -13,5 +13,8 @@
 @property (weak, nonatomic) IBOutlet UITextView *statusTextView;
 
 @property (weak, nonatomic) IBOutlet UITableView *peripheralsTable;
+
+@property (weak, nonatomic) IBOutlet UILabel *scanStatusLabel;
+
 @end
 
