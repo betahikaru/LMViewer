@@ -15,7 +15,6 @@
 
 @interface ViewController () <CBCentralManagerDelegate, CBPeripheralDelegate, UITableViewDelegate, UITableViewDataSource> {
     BOOL isScanning;
-    BOOL isRefreshTapped;
 }
 @property (nonatomic, strong) CBCentralManager *centralManager; // BLE Central Manager
 @property (nonatomic, strong) NSMutableArray *peripherals;      // Connected BLE Pripheral(s)
@@ -39,9 +38,6 @@
     self.lastUpdatedTimes = [[NSMutableDictionary alloc] init];
     self.peripheralsDescriptions = [[NSMutableDictionary alloc] init];
 
-    // 状態を初期化
-    isRefreshTapped = NO;
-
     // tableを初期化
     self.peripheralsTable.delegate = self;
     self.peripheralsTable.dataSource = self;
@@ -64,6 +60,7 @@
         [self.centralManager scanForPeripheralsWithServices:nil
                                                     options:option];
         NSLog(@"MSG-0001-I Started Scan.");
+        _scanStatusLabel.text = @"Scanning...";
     }
     return YES;
 }
@@ -73,23 +70,8 @@
     if (isScanning) {
         [self.centralManager stopScan];
         isScanning = NO;
-        BOOL isAllDisconnected = YES;
-        for (CBPeripheral *peripheral in self.peripherals) {
-            if ((peripheral.state == CBPeripheralStateConnected)
-                || (peripheral.state == CBPeripheralStateConnecting)) {
-                [self.centralManager cancelPeripheralConnection:peripheral];
-                isAllDisconnected = NO;
-                NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
-            }
-        }
         NSLog(@"MSG-0002-I Stopped Scan.");
-        if (isAllDisconnected && isRefreshTapped) {
-            isRefreshTapped = NO;
-            [self startPeripheralScan];
-        }
-    } else {
-        isRefreshTapped = NO;
-        [self startPeripheralScan];
+        _scanStatusLabel.text = @"Stopped Scan";
     }
     return YES;
 }
@@ -114,6 +96,26 @@
         NSLog(@"MSG-0006-I Start to connect to peripheral:%@", peripheral.identifier);
     }
     return YES;
+}
+
+// ペリフェラルとの接続を削除する
+- (BOOL) disconnectPeripheral:(CBPeripheral*)peripheral {
+    if ((peripheral.state == CBPeripheralStateConnected)
+        || (peripheral.state == CBPeripheralStateConnecting)) {
+        [self.centralManager cancelPeripheralConnection:peripheral];
+        NSMutableArray *newArray = [self.peripherals mutableCopy];
+        for (CBPeripheral *aPeripheral in newArray) {
+            if ([peripheral.identifier isEqual:aPeripheral.identifier]) {
+                [newArray removeObject:aPeripheral];
+                self.peripherals = newArray;
+                break;
+            }
+        }
+        NSLog(@"MSG-0003-I Cannelled peripherals connection. peripheral:%@" ,peripheral);
+        return YES;
+    } else {
+        return NO;
+    }
 }
 
 // キャラクタリスティック探索開始
@@ -198,11 +200,28 @@
 #pragma mark - IBOutlet
 
 - (IBAction)tapRefreshBtn:(UIButton *)sender {
-    if (isRefreshTapped) {
-        return;
+    for (CBPeripheral *peripheral in self.peripherals) {
+        [self disconnectPeripheral:peripheral];
     }
-    isRefreshTapped = YES;
     [self stopPeripheralScan];
+    [self startPeripheralScan];
+    [self dumpCurrentStatus];
+}
+
+- (IBAction)tapStartStopBtn:(UIButton *)sender {
+    if (isScanning) {
+        [self stopPeripheralScan];
+    } else {
+        [self startPeripheralScan];
+    }
+    [self dumpCurrentStatus];
+}
+
+- (IBAction)tapDisconnectAllPeripherals:(UIButton *)sender {
+    for (CBPeripheral *peripheral in self.peripherals) {
+        [self disconnectPeripheral:peripheral];
+    }
+    [self dumpCurrentStatus];
 }
 
 // =============================================================================
@@ -265,17 +284,8 @@
         NSLog(@"MSG-0022-E Failed to disconnect peripheral. peripheral:%@, error:%@", peripheral, error);
         return;
     }
-    BOOL isAllDisconnected = YES;
-    for (CBPeripheral *aPeripheral in self.peripherals) {
-        if (aPeripheral.state != CBPeripheralStateDisconnected) {
-            isAllDisconnected = NO;
-        }
-    }
-    if (isAllDisconnected && isRefreshTapped) {
-        self.peripherals = nil;
-        isRefreshTapped = NO;
-        [self startPeripheralScan];
-    }
+    NSLog(@"MSG-0026-I Disconnect pheripheral. peripheral:%@", peripheral);
+    [self dumpCurrentStatus];
 }
 
 // =============================================================================
@@ -383,7 +393,7 @@
 
 - (NSInteger)   tableView:(UITableView *)tableView
     numberOfRowsInSection:(NSInteger)section {
-    if (!self.peripherals) {
+    if (!self.peripherals || [self.peripherals count] == 0) {
         return 1;
     } else {
         return self.peripherals.count;
@@ -392,7 +402,7 @@
 
 - (UITableViewCell*) tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (!self.peripherals) {
+    if (!self.peripherals || [self.peripherals count] == 0) {
         UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"none"];
         cell =[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"none"];;
         cell.textLabel.text = @"None MAG";
